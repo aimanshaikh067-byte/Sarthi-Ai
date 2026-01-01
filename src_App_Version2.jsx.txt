@@ -1,0 +1,389 @@
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  BookOpen,
+  MessageCircle,
+  Brain,
+  FileText,
+  Send,
+  Loader2,
+  Sparkles,
+  GraduationCap,
+  ChevronRight,
+  RefreshCcw,
+  CheckCircle,
+  XCircle,
+  ChevronLeft
+} from 'lucide-react';
+
+/* Minimal Sarthi App (uses a backend at /api/generate)
+   - Place this in src/App.jsx
+   - The serverless function at /api/generate (provided) must be deployed (Vercel will do this for you).
+*/
+
+const SarthiApp = () => {
+  // --- State Management ---
+  const [currentView, setCurrentView] = useState('input'); // input, summary, chat, quiz
+  const [studentLevel, setStudentLevel] = useState('Class 9-10');
+  const [notesContent, setNotesContent] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Feature Data
+  const [summary, setSummary] = useState('');
+  const [chatHistory, setChatHistory] = useState([
+    { role: 'model', text: "Namaste! I am Sarthi, your AI study buddy. Upload your notes or paste text, and I'll help you revise, solve doubts, and take quizzes. Kya start karein?" }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [quizQuestions, setQuizQuestions] = useState([]);
+  const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
+  const [quizScore, setQuizScore] = useState(0);
+  const [quizSubmitted, setQuizSubmitted] = useState(false);
+  const [selectedOption, setSelectedOption] = useState(null);
+
+  const chatEndRef = useRef(null);
+
+  // --- Constants ---
+  const LEVELS = ['Class 5-8', 'Class 9-10', 'Class 11-12 (Science)', 'Class 11-12 (Commerce/Arts)', 'College/Competitive'];
+
+  const SAMPLE_TEXT = `Photosynthesis is the process by which green plants, algae, and some bacteria convert light energy into chemical energy. This energy is stored in the bonds of glucose molecules. The process mainly takes place in the chloroplasts of plant cells, using the green pigment chlorophyll.
+
+Key Requirements:
+1. Sunlight: The source of energy.
+2. Water (H2O): Absorbed by roots from the soil.
+3. Carbon Dioxide (CO2): Absorbed from the air through stomata.
+
+The Equation:
+6CO2 + 6H2O + Light Energy → C6H12O6 (Glucose) + 6O2 (Oxygen)
+
+Importance:
+- Produces oxygen, which is essential for life on Earth.
+- It is the primary source of food for almost all living organisms.`;
+
+  // --- Helper Functions ---
+  const scrollToBottom = () => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [chatHistory, currentView]);
+
+  // --- Proxy-based API Interaction ---
+  const generateContent = async (prompt, type = 'text') => {
+    setIsLoading(true);
+    try {
+      const systemPrompt = `
+        You are Sarthi, a friendly and patient AI tutor for Indian students.
+        Target Student Level: ${studentLevel}.
+
+        Guidelines:
+        1. Tone: Encouraging, like a good teacher or "bhaiya/didi".
+        2. Language: Primarily English, but use simple "Hinglish" where helpful.
+        3. Context: Use examples relevant to India where possible.
+        4. Focus: Help them understand concepts, not just memorize.
+
+        Current Context (The student's notes):
+        "${notesContent.substring(0, 5000)}"
+      `;
+
+      const resp = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, systemPrompt, type }),
+      });
+
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        console.error('Proxy error:', data);
+        return "Arre yaar! Something went wrong. Please try again later.";
+      }
+
+      return data.data;
+    } catch (err) {
+      console.error('Client error calling proxy:', err);
+      return "Arre yaar! Something went wrong. Please check your connection.";
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // --- Handlers ---
+  const handleSummarize = async () => {
+    if (!notesContent.trim()) return;
+    setCurrentView('summary');
+    setSummary('');
+    const result = await generateContent("Please provide a concise summary of these notes. Use bullet points for key concepts. Highlight important formulas or dates if any. Make it perfect for last-minute revision.");
+    setSummary(result);
+  };
+
+  const handleChatSend = async () => {
+    if (!chatInput.trim()) return;
+
+    const userMsg = { role: 'user', text: chatInput };
+    setChatHistory(prev => [...prev, userMsg]);
+    setChatInput('');
+
+    const aiMsgText = await generateContent(`Student asks: "${chatInput}". Answer briefly and clearly. If it's a doubt, explain simply.`);
+    setChatHistory(prev => [...prev, { role: 'model', text: aiMsgText }]);
+  };
+
+  const handleGenerateQuiz = async () => {
+    if (!notesContent.trim()) return;
+    setCurrentView('quiz');
+    setQuizSubmitted(false);
+    setQuizScore(0);
+    setCurrentQuizIndex(0);
+    setQuizQuestions([]);
+
+    const prompt = `Generate 5 multiple choice questions (MCQs) based on the notes provided.
+    Return ONLY a JSON array with this structure:
+    [{"question": "Question text", "options": ["A", "B", "C", "D"], "answer": 0}]
+    (where answer is the index 0-3 of the correct option).`;
+
+    try {
+      const questions = await generateContent(prompt, 'json');
+      if (Array.isArray(questions)) {
+        setQuizQuestions(questions);
+      } else {
+        throw new Error("Invalid format");
+      }
+    } catch (e) {
+      console.error("Quiz generation error:", e);
+      setQuizQuestions([]);
+    }
+  };
+
+  const handleQuizAnswer = (optionIndex) => {
+    if (quizSubmitted) return;
+    setSelectedOption(optionIndex);
+  };
+
+  const submitQuizAnswer = () => {
+    if (selectedOption === null) return;
+    setQuizSubmitted(true);
+    if (selectedOption === quizQuestions[currentQuizIndex].answer) {
+      setQuizScore(prev => prev + 1);
+    }
+  };
+
+  const nextQuestion = () => {
+    setQuizSubmitted(false);
+    setSelectedOption(null);
+    setCurrentQuizIndex(prev => prev + 1);
+  };
+
+  // --- Render Components (simple markup; classes from original demo remain) ---
+  const renderHeader = () => (
+    <header style={{ background: 'var(--indigo)', color: 'white', padding: 12 }}>
+      <div className="max-w-4xl" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <GraduationCap size={28} color="white" />
+          <h1 style={{ margin: 0 }}>Sarthi AI</h1>
+        </div>
+        <div>
+          <select value={studentLevel} onChange={(e) => setStudentLevel(e.target.value)} style={{ padding: '6px', borderRadius: 6, border: 'none', background: 'rgba(255,255,255,0.1)', color: 'white' }}>
+            {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+      </div>
+    </header>
+  );
+
+  const renderNav = () => (
+    <nav style={{ background: 'white', borderBottom: '1px solid #e5e7eb' }}>
+      <div className="max-w-4xl" style={{ display: 'flex', justifyContent: 'space-around', padding: 8 }}>
+        <button onClick={() => setCurrentView('input')}>Notes</button>
+        <button onClick={() => { if (notesContent) handleSummarize(); else setCurrentView('summary'); }} disabled={!notesContent}>Summary</button>
+        <button onClick={() => setCurrentView('chat')}>Doubts</button>
+        <button onClick={handleGenerateQuiz} disabled={!notesContent}>Quiz</button>
+      </div>
+    </nav>
+  );
+
+  const renderInputView = () => (
+    <div className="p-6 max-w-4xl">
+      <div style={{ background: 'white', borderRadius: 12, padding: 20, border: '1px solid #e5e7eb' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+          <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}><Sparkles color="#f59e0b" />Study Material</h2>
+          <button onClick={() => setNotesContent(SAMPLE_TEXT)} style={{ background: 'transparent', color: 'var(--indigo)', border: 'none', cursor: 'pointer' }}>Try Sample (Science)</button>
+        </div>
+
+        <textarea value={notesContent} onChange={(e) => setNotesContent(e.target.value)} placeholder="Paste your chapter notes here..." />
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <button onClick={handleSummarize} disabled={!notesContent.trim() || isLoading} className="btn">
+            {isLoading ? 'Working...' : 'Summarize Notes'}
+          </button>
+          <button onClick={handleGenerateQuiz} disabled={!notesContent.trim() || isLoading} style={{ background: '#fb923c', color: 'white', padding: '0.6rem 1.2rem', borderRadius: 8, border: 'none' }}>
+            {isLoading ? 'Working...' : 'Take a Quiz'}
+          </button>
+        </div>
+        <p style={{ fontSize: 12, color: '#6b7280', marginTop: 8, textAlign: 'center' }}>AI generated content can be inaccurate. Always verify with your textbooks.</p>
+      </div>
+    </div>
+  );
+
+  const renderSummaryView = () => (
+    <div className="p-6 max-w-4xl">
+      <div style={{ background: 'white', borderRadius: 12, padding: 20, minHeight: '40vh', border: '1px solid #e5e7eb' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid #f3f4f6', paddingBottom: 12 }}>
+          <h2 style={{ margin: 0 }}>Quick Revision Summary</h2>
+          <button onClick={() => setCurrentView('input')} style={{ border: 'none', background: 'transparent' }}><XCircle /></button>
+        </div>
+
+        {isLoading ? (
+          <div style={{ textAlign: 'center' }}>
+            <Loader2 className="spin" />
+            <p>Reading your notes...</p>
+          </div>
+        ) : summary ? (
+          <div style={{ whiteSpace: 'pre-wrap', color: '#374151', fontSize: 16 }}>{summary}</div>
+        ) : (
+          <div style={{ textAlign: 'center', color: '#9ca3af', marginTop: 40 }}>
+            <p>No summary generated yet.</p>
+            <button onClick={() => setCurrentView('input')} style={{ color: 'var(--indigo)', background: 'transparent', border: 'none' }}>Go back to add notes</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderChatView = () => (
+    <div style={{ maxWidth: 768, margin: '0 auto', minHeight: '60vh', padding: 16 }}>
+      <div style={{ background: '#fff', padding: 16, borderRadius: 12, border: '1px solid #e5e7eb', minHeight: '40vh' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {chatHistory.map((msg, idx) => (
+            <div key={idx} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+              <div style={{ background: msg.role === 'user' ? 'var(--indigo)' : 'white', color: msg.role === 'user' ? 'white' : '#111827', padding: 12, borderRadius: 12, border: '1px solid #e5e7eb', maxWidth: '80%' }}>
+                {msg.text}
+              </div>
+            </div>
+          ))}
+        </div>
+        {isLoading && <p>Thinking...</p>}
+      </div>
+
+      <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+        <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleChatSend()} placeholder="Ask a doubt..." style={{ flex: 1 }} />
+        <button onClick={handleChatSend} disabled={!chatInput.trim() || isLoading} className="btn"><Send /></button>
+      </div>
+      <div ref={chatEndRef} />
+    </div>
+  );
+
+  const renderQuizView = () => {
+    if (isLoading) {
+      return (
+        <div style={{ textAlign: 'center', padding: 40 }}>
+          <Loader2 />
+          <p>Generating questions from your notes...</p>
+        </div>
+      );
+    }
+
+    if (!quizQuestions.length) {
+      return (
+        <div style={{ textAlign: 'center', padding: 40 }}>
+          <XCircle size={32} color="#fb923c" />
+          <h3>Quiz Generation Failed</h3>
+          <p>We couldn't generate questions from the provided text. Please try adding more detailed notes.</p>
+          <button onClick={() => setCurrentView('input')} style={{ color: 'var(--indigo)', background: 'transparent', border: 'none' }}>Return to Notes</button>
+        </div>
+      );
+    }
+
+    if (currentQuizIndex >= quizQuestions.length) {
+      const percentage = (quizScore / quizQuestions.length) * 100;
+      return (
+        <div style={{ maxWidth: 600, margin: '2rem auto', textAlign: 'center' }}>
+          <div style={{ background: 'white', padding: 24, borderRadius: 12, border: '1px solid #e5e7eb' }}>
+            <h2>Quiz Completed!</h2>
+            <div style={{ fontSize: 40, color: 'var(--indigo)' }}>{quizScore}/{quizQuestions.length}</div>
+            <p>{percentage >= 80 ? 'Shabaash! Excellent understanding.' : 'Keep practicing! Review the summary and try again.'}</p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+              <button onClick={() => { setCurrentQuizIndex(0); setQuizScore(0); setQuizSubmitted(false); setSelectedOption(null); }} style={{ padding: '8px 12px' }}>Retake Quiz</button>
+              <button onClick={() => setCurrentView('summary')} className="btn">Review Summary</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const currentQ = quizQuestions[currentQuizIndex];
+    const optionLetters = ['A', 'B', 'C', 'D'];
+
+    return (
+      <div style={{ maxWidth: 800, margin: '1.5rem auto', padding: 16 }}>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#6b7280' }}>
+            <span>Question {currentQuizIndex + 1} of {quizQuestions.length}</span>
+            <span>Score: {quizScore}</span>
+          </div>
+        </div>
+
+        <div style={{ background: 'white', borderRadius: 12, padding: 16, border: '1px solid #e5e7eb' }}>
+          <h3>{currentQ.question}</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+            {currentQ.options.map((option, idx) => {
+              let style = { border: '1px solid #e5e7eb', padding: 12, borderRadius: 8, textAlign: 'left', display: 'flex', gap: 12, alignItems: 'center', background: 'white' };
+              if (quizSubmitted) {
+                if (idx === currentQ.answer) style = { ...style, borderColor: '#22c55e', background: '#ecfdf5' };
+                else if (idx === selectedOption && selectedOption !== currentQ.answer) style = { ...style, borderColor: '#ef4444', background: '#fff1f2' };
+              } else if (selectedOption === idx) {
+                style = { ...style, borderColor: 'var(--indigo)', background: '#eef2ff' };
+              }
+
+              return (
+                <button key={idx} onClick={() => handleQuizAnswer(idx)} disabled={quizSubmitted} style={style}>
+                  <div style={{ width: 36, height: 36, borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', background: selectedOption === idx ? 'var(--indigo)' : '#f3f4f6', color: selectedOption === idx ? 'white' : '#111827' }}>
+                    {optionLetters[idx]}
+                  </div>
+                  <div style={{ flex: 1 }}>{option}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 16, alignItems: 'center' }}>
+            <div style={{ color: '#6b7280' }}>
+              {quizSubmitted ? (
+                selectedOption === currentQ.answer ? (
+                  <div style={{ color: '#16a34a', display: 'flex', gap: 8, alignItems: 'center' }}><CheckCircle />Correct</div>
+                ) : (
+                  <div style={{ color: '#dc2626', display: 'flex', gap: 8, alignItems: 'center' }}><XCircle />Incorrect — Correct: {optionLetters[currentQ.answer]}</div>
+                )
+              ) : (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><ChevronLeft />Select an option and submit</div>
+              )}
+            </div>
+
+            <div>
+              {!quizSubmitted ? (
+                <button onClick={submitQuizAnswer} disabled={selectedOption === null} className="btn">Submit Answer</button>
+              ) : (
+                <button onClick={nextQuestion} className="btn">{currentQuizIndex + 1 === quizQuestions.length ? 'Finish Quiz' : 'Next Question'}</button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // --- Main render ---
+  return (
+    <div style={{ minHeight: '100vh' }}>
+      {renderHeader()}
+      {renderNav()}
+      <main style={{ paddingTop: 16, paddingBottom: 48 }}>
+        {currentView === 'input' && renderInputView()}
+        {currentView === 'summary' && renderSummaryView()}
+        {currentView === 'chat' && renderChatView()}
+        {currentView === 'quiz' && renderQuizView()}
+      </main>
+      <footer style={{ textAlign: 'center', fontSize: 12, color: '#9ca3af', padding: 12 }}>Sarthi AI — AI helper for students. Verify important facts from your textbooks.</footer>
+    </div>
+  );
+};
+
+export default SarthiApp;
